@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
 //! 4 階頁表（4 KiB granule、48-bit VA）與 MMU 開關。
 //!
 //! M1 只建恆等映射（VA == PA）：TTBR0_EL1 涵蓋整個核心看得到的位址空間，

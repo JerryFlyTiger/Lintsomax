@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
 //! 實體記憶體框配置器：一個從 `__kernel_end` 開始往上長的 bump allocator。
 //!
 //! QEMU virt 的 RAM 從 0x4000_0000 起，共 128 MiB，到 0x4800_0000。

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
 //! ARM 半主機（semihosting）：讓核心可以主動結束 QEMU，
 //! `cargo run` 才會正常收工，而不是把終端機卡住。
 

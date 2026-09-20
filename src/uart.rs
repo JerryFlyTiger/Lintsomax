@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
 //! PL011 UART —— QEMU virt 把它映在 0x0900_0000。
 
 use core::fmt::{self, Write};

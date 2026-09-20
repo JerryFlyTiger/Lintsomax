@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
 //! 例外向量表與故障報告。
 //!
 //! 這是 Lintsomax 的主題所在：故障不該是「整台機器倒下」，

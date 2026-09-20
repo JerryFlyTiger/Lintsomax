@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
 //! 開機路徑：從 QEMU 交棒的那一刻到 `kernel_main`。
 
 use core::arch::global_asm;

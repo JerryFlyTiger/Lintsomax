@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
 //! Rust panic 的落地點。目前直接印出來然後收工。
 
 use core::panic::PanicInfo;
