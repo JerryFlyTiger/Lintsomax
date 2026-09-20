@@ -39,7 +39,7 @@ cargo run -- debug
 In practice, `opt-level = 1` turns every local variable into `<optimized out>`,
 and breakpoints end up landing inside inlined `core` source code.
 
-## Status: M1 complete
+## Status: M1.5 complete
 
 - [x] **M0** aarch64 boot, halts at EL1, only core 0 runs on multi-core
 - [x] **M0** PL011 UART + `println!`
@@ -48,8 +48,8 @@ and breakpoints end up landing inside inlined `core` source code.
 - [x] **M1** physical frame allocator (bump)
 - [x] **M1** four-level page tables, identity mapping, MMU enabled
 - [x] **M1** `.text` read-only and executable, data regions non-executable
-- [ ] **M1.5** making the vector table recoverable <- next step
-- [ ] **M2** capability table, higher-half kernel (TTBR1) migration
+- [x] **M1.5** register save/restore frame, recoverable faults, `.rodata` and `.text` permission probes
+- [ ] **M2** capability table, higher-half kernel (TTBR1) migration <- next step
 - [ ] **M3** IPC
 - [ ] **M4** first isolated virtio driver <- first real demo of fault isolation
 
@@ -58,7 +58,7 @@ and breakpoints end up landing inside inlined `core` source code.
 ```
 src/boot.rs        _start: park cores, set up stack, clear .bss
 src/uart.rs        PL011 driver + print!/println!
-src/exceptions.rs  vector table, ESR/FAR decoding        <- where the project's core topic lives
+src/exceptions.rs  vector table, register frame, fault recovery, ESR/FAR decoding  <- where the project's core topic lives
 src/mm.rs          physical memory frame allocator (bump)
 src/paging.rs      four-level page tables, identity mapping, MMU on/off
 src/panic.rs       Rust panic landing
@@ -66,13 +66,50 @@ src/semihost.rs    lets the kernel actively terminate QEMU
 linker.ld          memory layout (loaded at 0x4010_0000)
 ```
 
-## Known issues (found by cold review, not fixed yet)
+## Fault isolation demo
 
-See "Review log" in `PLAN.md`. The most important one: **the current
-self-verification doesn't reliably detect incorrectly written page table
-permission bits** -- in practice, swapping `AP_RW`/`AP_RO` causes the kernel
-to die silently when the MMU is enabled, with no diagnostic message at all.
-M1.5's recoverable exceptions exist specifically to close this gap.
+`cargo run` takes four deliberate faults and survives the first three:
+
+```
+  [1/4] Reading an unmapped address - expect a recovered translation fault.
+  recovered: FSC=0x05 translation fault level 1 at 0x0000000080000000, skipping the instruction
+  [1/4] Still running after the fault.
+  [1/4] Arming flag after the fault: consumed (single-shot).
+  [2/4] .rodata probe at 0x0000000040107898 = 0x123456789ABCDEF0 (mapped read-only by M1).
+  recovered: FSC=0x0F permission fault at 0x0000000040107898, skipping the instruction
+  [2/4] Probe still reads 0x123456789ABCDEF0 - unchanged, the read-only mapping held.
+  [3/4] .text probe at 0x0000000040100000 = 0xA0 (mapped read-only by M1).
+  recovered: FSC=0x0F permission fault at 0x0000000040100000, skipping the instruction
+  [3/4] Probe still reads 0xA0 - unchanged, the read-only mapping held.
+  [4/4] Arming recovery, then executing SVC #0 ... the kernel should still halt.
+```
+
+The last fault is armed for recovery on purpose and still halts, because an
+SVC is not a data abort. That is the EC filter refusing it, not the arming
+flag.
+
+Faults 2 and 3 are the point of the milestone. M1 could map `.text` or
+`.rodata` with the wrong permission bits and nothing would notice: with an
+identity mapping, wrong permissions only show up when something actually
+tries the access. Nothing wrote to read-only memory, so nothing ever checked.
+Swapping `AP_RW`/`AP_RO` back then produced a silent death with no diagnostic
+at all. Now there is a test that writes to read-only memory and expects to be
+refused, and a mutation of either mapping prints a loud warning instead.
+
+Recovery means the faulting instruction is **discarded, not retried**:
+`ELR_EL1 += 4` skips it. A recovered load leaves its destination register
+holding whatever it held before, and a recovered store never happens. That is
+why both probes read back unchanged. See the limits list at the top of
+`src/exceptions.rs`.
+
+## Known issues
+
+See "Review log" in `PLAN.md`. The largest remaining gap: the recovery path
+only accepts faults taken through a **synchronous** vector entry, because
+`ESR_EL1` is not updated by IRQ or FIQ and a stale `EC` could make an
+interrupt look recoverable. That filter is currently untestable -- removing it
+changes no output, since nothing can raise an interrupt yet. It gets a real
+test in M3.
 
 ## License
 

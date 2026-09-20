@@ -2,19 +2,63 @@
 //! Exception vector table and fault reporting.
 //!
 //! This is what Lintsomax is about: a fault should not mean "the whole machine
-//! goes down", it should mean "here is a report you can read". M0 delivers the
-//! report; isolation is left to later milestones.
-
+//! goes down", it should mean "here is a report you can read". M0 delivered the
+//! report; M1.5 adds recovery: a single armed fault is reported and skipped
+//! instead of halting the kernel.
+//!
+//! Limits of this design, not yet addressed:
+//! (a) there is no nested-fault guard - a fault taken *inside* the handler
+//!     itself (e.g. in the `println!` path) recurses through the same vector
+//!     entry, pushing a new frame on top of the old one, until the stack is
+//!     exhausted;
+//! (b) the frame is only meaningfully saved for the current-EL/SP_ELx path in
+//!     practice, since there is no lower EL yet for anything to fault from;
+//! (c) resume means discard, not retry - `ELR_EL1 += 4` skips the faulting
+//!     instruction; it does not fix anything and re-execute. A recovered load
+//!     leaves its destination register holding whatever it held before, and a
+//!     recovered store never happens. Any future caller that expects "fix the
+//!     mapping, then retry" will get silently wrong results rather than a
+//!     crash. (This is exactly why the `.rodata`/`.text` probes below read
+//!     back unchanged - the write is discarded, not retried.)
+//! (d) arming is a global single-shot flag, unrelated to any particular
+//!     instruction - any unrelated exception occurring between
+//!     `arm_recovery()` and the intended faulting instruction consumes the
+//!     arming. The demo has no such window today because nothing between the
+//!     two can fault, but the API is fragile by construction.
 use core::arch::{asm, global_asm};
+use core::sync::atomic::{AtomicBool, Ordering};
+
+/// x0-x30 as saved by the vector entry, plus one slot of padding so the frame
+/// stays 16-byte aligned.
+#[repr(C)]
+pub struct ExceptionFrame {
+    pub x: [u64; 31],
+    pub _pad: u64,
+}
+
+// These numbers are the same ones written in the `stp`/`ldp` offsets and the
+// `sub sp, sp, #256` in the asm below. Changing one side without the other
+// must fail the build, not silently corrupt the saved register state.
+const _: () = assert!(core::mem::size_of::<ExceptionFrame>() == 256);
+const _: () = assert!(core::mem::offset_of!(ExceptionFrame, x) == 0);
+const _: () = assert!(core::mem::offset_of!(ExceptionFrame, _pad) == 248);
+
+/// The handler's verdict, returned in x0 to the asm trampoline.
+const HALT: u64 = 0;
+const RESUME: u64 = 1;
 
 // 16 vector entries, 128 bytes each (.align 7); the whole table is 2048-aligned
-// (.align 11). Every entry does just two things: put its own index in x0 and
-// jump to the shared handler.
+// (.align 11). Each entry saves x0/x1 (so the faulting x0 isn't clobbered by
+// the index load), then loads its own index and jumps to the shared handler,
+// which saves the rest of the registers, calls into Rust, and either resumes
+// or halts based on the verdict.
 global_asm!(
     ".macro VEC_ENTRY idx",
     "   .align 7",
-    "   mov x0, #\\idx",
-    "   b   __exception_common",
+    "   sub  sp, sp, #256",
+    "   stp  x0, x1, [sp, #0]",
+    "   mov  x0, #\\idx",
+    "   b    __exception_common",
     ".endm",
     ".section .text",
     ".align 11",
@@ -41,9 +85,50 @@ global_asm!(
     "   VEC_ENTRY 14",
     "   VEC_ENTRY 15",
     "__exception_common:",
-    "   bl  rust_exception_handler",
-    "1: wfe",
-    "   b   1b",
+    "   stp  x2,  x3,  [sp, #16]",
+    "   stp  x4,  x5,  [sp, #32]",
+    "   stp  x6,  x7,  [sp, #48]",
+    "   stp  x8,  x9,  [sp, #64]",
+    "   stp  x10, x11, [sp, #80]",
+    "   stp  x12, x13, [sp, #96]",
+    "   stp  x14, x15, [sp, #112]",
+    "   stp  x16, x17, [sp, #128]",
+    "   stp  x18, x19, [sp, #144]",
+    "   stp  x20, x21, [sp, #160]",
+    "   stp  x22, x23, [sp, #176]",
+    "   stp  x24, x25, [sp, #192]",
+    "   stp  x26, x27, [sp, #208]",
+    "   stp  x28, x29, [sp, #224]",
+    "   str  x30,      [sp, #240]",
+    "   mov  x1, sp",
+    "   bl   rust_exception_handler",
+    "   cbz  x0, .Lhalt",
+    "   ldr  x30,      [sp, #240]",
+    "   ldp  x28, x29, [sp, #224]",
+    "   ldp  x26, x27, [sp, #208]",
+    "   ldp  x24, x25, [sp, #192]",
+    "   ldp  x22, x23, [sp, #176]",
+    "   ldp  x20, x21, [sp, #160]",
+    "   ldp  x18, x19, [sp, #144]",
+    "   ldp  x16, x17, [sp, #128]",
+    "   ldp  x14, x15, [sp, #112]",
+    "   ldp  x12, x13, [sp, #96]",
+    "   ldp  x10, x11, [sp, #80]",
+    "   ldp  x8,  x9,  [sp, #64]",
+    "   ldp  x6,  x7,  [sp, #48]",
+    "   ldp  x4,  x5,  [sp, #32]",
+    "   ldp  x2,  x3,  [sp, #16]",
+    "   ldp  x0,  x1,  [sp, #0]",
+    "   add  sp, sp, #256",
+    "   eret",
+    ".Lhalt:",
+    "   bl   kernel_halt",
+    // kernel_halt is `-> !` and never returns in practice (it terminates QEMU
+    // via semihosting). This loop is only a backstop so that a kernel_halt
+    // that somehow returns anyway cannot fall through into whatever code
+    // happens to follow in .text.
+    "   wfe",
+    "   b    .Lhalt",
 );
 
 extern "C" {
@@ -121,8 +206,51 @@ fn describe_fsc(fsc: u64) -> &'static str {
     }
 }
 
+/// Set when the next synchronous data abort at the current EL should be
+/// reported in one line, have its faulting instruction skipped, and let
+/// execution continue - instead of the full report-and-halt path. Single-shot:
+/// cleared the moment it is consumed, whether or not the next fault actually
+/// matches.
+static RECOVER_ARMED: AtomicBool = AtomicBool::new(false);
+
+/// Arm a single recovery: the next synchronous data abort taken at the current
+/// EL is reported in one line, its instruction is skipped, and execution
+/// continues. Anything else still halts.
+pub fn arm_recovery() {
+    RECOVER_ARMED.store(true, Ordering::SeqCst);
+}
+
+/// Whether a recovery is currently armed. Exposed so the demo can show that
+/// arming is single-shot: consumed by the first matching fault.
+pub fn recovery_is_armed() -> bool {
+    RECOVER_ARMED.load(Ordering::SeqCst)
+}
+
+/// The vector table has 16 entries arranged as four rows of four: for each of
+/// the four exception sources (current EL/SP_EL0, current EL/SP_ELx, lower EL
+/// AArch64, lower EL AArch32) the four entries are, in order, Synchronous /
+/// IRQ / FIQ / SError. So an entry is the synchronous one for its row exactly
+/// when its index is a multiple of 4.
+///
+/// This matters because `ESR_EL1` is only updated by synchronous exceptions.
+/// It is not updated by IRQ or FIQ, so an IRQ taken while recovery is armed
+/// could read a stale EC left over from an earlier synchronous fault and be
+/// misjudged as recoverable.
+fn is_synchronous_entry(index: u64) -> bool {
+    index.is_multiple_of(4)
+}
+
 #[no_mangle]
-extern "C" fn rust_exception_handler(index: u64) -> ! {
+extern "C" fn kernel_halt() -> ! {
+    crate::semihost::exit(0)
+}
+
+#[no_mangle]
+extern "C" fn rust_exception_handler(index: u64, frame: *mut ExceptionFrame) -> u64 {
+    // M2 will use `frame` to report (and eventually restart) the faulting
+    // task's register state; for now the frame is saved but not inspected.
+    let _ = frame;
+
     let (esr, far, elr, spsr): (u64, u64, u64, u64);
     unsafe {
         asm!("mrs {}, esr_el1",  out(reg) esr,  options(nomem, nostack));
@@ -134,6 +262,23 @@ extern "C" fn rust_exception_handler(index: u64) -> ! {
     let ec = (esr >> 26) & 0x3F;
     let fsc = esr & 0x3F;
     let source = SOURCE.get(index as usize).copied().unwrap_or("?");
+
+    let armed = RECOVER_ARMED.swap(false, Ordering::SeqCst);
+    if armed && is_synchronous_entry(index) && (ec == 0x24 || ec == 0x25) {
+        crate::println!(
+            "  recovered: FSC=0x{:02X} {} at 0x{:016X}, skipping the instruction",
+            fsc,
+            describe_fsc(fsc),
+            far
+        );
+        // A64 instructions are always 4 bytes wide, so advancing ELR_EL1 by 4
+        // always lands exactly on the instruction after the faulting one.
+        let elr_next = elr + 4;
+        unsafe {
+            asm!("msr elr_el1, {v}", "isb", v = in(reg) elr_next, options(nostack));
+        }
+        return RESUME;
+    }
 
     crate::println!();
     crate::println!("┌─ Lintsomax caught an exception ─────────────────");
@@ -150,7 +295,14 @@ extern "C" fn rust_exception_handler(index: u64) -> ! {
     crate::println!();
     crate::println!("On Linux, the whole machine would have panicked by now.");
     crate::println!("The goal of Lintsomax is that only the component at fault goes down.");
-    crate::println!("(M0 has no isolation yet, so for now this is still where it stops.)");
+    if armed {
+        crate::println!(
+            "Recovery was armed, but this fault does not qualify (not a synchronous data \
+             abort), so the kernel stops here."
+        );
+    } else {
+        crate::println!("This fault was not armed for recovery, so the kernel stops here.");
+    }
 
-    crate::semihost::exit(0)
+    HALT
 }
