@@ -1,0 +1,19 @@
+[package]
+name    = "lintsomax"
+version = "0.0.1"
+edition = "2021"
+
+# 開發用：變數全部看得見（實測 opt-level=1 會讓變數變成 <optimized out>）
+[profile.dev]
+panic     = "abort"
+opt-level = 0
+debug     = 2
+
+# 量測用：符號留著，不影響執行速度
+[profile.release]
+panic     = "abort"
+opt-level = 2
+debug     = 2
+# 核心的 debug_assert 守的是「linker script 保證的對齊」這類前提，
+# 被編掉的話違反會靜默發生，所以 release 也留著。
+debug-assertions = true

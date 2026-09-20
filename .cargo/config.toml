@@ -1,0 +1,9 @@
+[build]
+target = "aarch64-unknown-none-softfloat"
+
+[target.aarch64-unknown-none-softfloat]
+runner = "./run.sh"
+rustflags = [
+  "-C", "link-arg=-Tlinker.ld",
+  "-C", "force-frame-pointers=yes",
+]
