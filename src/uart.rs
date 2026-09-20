@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
-//! PL011 UART —— QEMU virt 把它映在 0x0900_0000。
+//! PL011 UART - QEMU virt maps it at 0x0900_0000.
 
 use core::fmt::{self, Write};
 
@@ -12,7 +12,7 @@ const FBRD: usize = 0x28; // Fractional baud rate divisor
 const LCRH: usize = 0x2C; // Line control
 const CR: usize = 0x30; // Control
 
-const FR_TXFF: u32 = 1 << 5; // 傳送 FIFO 滿了
+const FR_TXFF: u32 = 1 << 5; // Transmit FIFO full
 
 const fn reg(off: usize) -> *mut u32 {
     (BASE + off) as *mut u32
@@ -20,11 +20,11 @@ const fn reg(off: usize) -> *mut u32 {
 
 pub fn init() {
     unsafe {
-        core::ptr::write_volatile(reg(CR), 0); // 先關掉再設定
+        core::ptr::write_volatile(reg(CR), 0); // Disable before configuring
         core::ptr::write_volatile(reg(IBRD), 13); // 24 MHz / (16 × 115200)
         core::ptr::write_volatile(reg(FBRD), 1);
         core::ptr::write_volatile(reg(LCRH), (0b11 << 5) | (1 << 4)); // 8-N-1 + FIFO
-        core::ptr::write_volatile(reg(CR), (1 << 0) | (1 << 8) | (1 << 9)); // 啟用 + TX + RX
+        core::ptr::write_volatile(reg(CR), (1 << 0) | (1 << 8) | (1 << 9)); // Enable + TX + RX
     }
 }
 
@@ -41,7 +41,7 @@ impl Write for Uart {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for b in s.bytes() {
             if b == b'\n' {
-                put(b'\r'); // 終端機要 CRLF
+                put(b'\r'); // Terminals expect CRLF
             }
             put(b);
         }

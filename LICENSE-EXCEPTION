@@ -4,14 +4,6 @@
 This exception accompanies, and does not replace, the GNU General Public
 License version 3 (see the file LICENSE).
 
-The authoritative text of this exception is the English text below. The
-Chinese text that follows is a convenience translation and has no legal
-effect.
-
-
-ENGLISH (authoritative)
------------------------
-
 NOTE! This copyright does *not* cover user programs that use Lintsomax
 kernel services by normal system calls, nor programs that communicate with
 Lintsomax kernel services through its inter-process communication (IPC)
@@ -41,29 +33,3 @@ derived work of the kernel, which is not the intent of the authors.
 
 This exception is granted in perpetuity and is irrevocable for any version
 of Lintsomax it has been distributed with.
-
-
-中文（僅供參考，不具法律效力）
------------------------------
-
-注意！本著作權**不涵蓋**以下列方式使用 Lintsomax 的程式：透過正常的系統呼叫
-使用核心服務，或透過核心的行程間通訊（IPC）介面與核心服務溝通。這些僅被視為
-對核心的正常使用，**不構成**「衍生作品」。
-
-因此，下列各項**不視為** Lintsomax 的衍生作品，其作者可自行選擇任何授權條款：
-
-  (a) 呼叫 Lintsomax 系統呼叫的使用者空間程式；
-
-  (b) 完全透過 Lintsomax 的系統呼叫、IPC 訊息、capability 呼用，或經由這些
-      介面建立的共享記憶體區域，來與核心或彼此互動的使用者空間伺服器、
-      驅動程式及其他元件；
-
-  (c) 僅是在以 Lintsomax 開機的機器上執行的程式。
-
-對 Lintsomax 核心原始碼本身的修改，仍完整適用 GNU 通用公共授權第三版或更新版本。
-
-設立這項例外的原因是 Lintsomax 是微核心：驅動程式、檔案系統與網路堆疊被刻意
-設計成獨立的使用者空間程式，而不是核心的一部分。若無此例外，系統的正常架構
-可能被解讀為使每一個這類元件都成為核心的衍生作品，而這並非作者的意圖。
-
-本例外永久授予，且對於任何已隨其一同散布的 Lintsomax 版本均不可撤回。

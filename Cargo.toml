@@ -3,17 +3,19 @@ name    = "lintsomax"
 version = "0.0.1"
 edition = "2021"
 
-# 開發用：變數全部看得見（實測 opt-level=1 會讓變數變成 <optimized out>）
+# For development: every variable stays visible (opt-level=1 was measured to turn
+# variables into <optimized out>)
 [profile.dev]
 panic     = "abort"
 opt-level = 0
 debug     = 2
 
-# 量測用：符號留著，不影響執行速度
+# For measurement: keep the symbols, no effect on run-time speed
 [profile.release]
 panic     = "abort"
 opt-level = 2
 debug     = 2
-# 核心的 debug_assert 守的是「linker script 保證的對齊」這類前提，
-# 被編掉的話違反會靜默發生，所以 release 也留著。
+# The kernel's debug_asserts guard premises such as "the alignment the linker
+# script guarantees". If they are compiled out, a violation happens silently,
+# so they stay on in release too.
 debug-assertions = true

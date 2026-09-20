@@ -1,4 +1,4 @@
-/* QEMU virt 的 RAM 從 0x4000_0000 開始；0x4010_0000 留一段給未來的 DTB */
+/* RAM on QEMU virt starts at 0x4000_0000; loading at 0x4010_0000 leaves room for a future DTB */
 ENTRY(_start)
 
 SECTIONS
@@ -8,7 +8,7 @@ SECTIONS
   . = ALIGN(4096);
   __text_start = .;
   .text : ALIGN(8) {
-    KEEP(*(.text.boot))     /* _start 必須排第一 */
+    KEEP(*(.text.boot))     /* _start must come first */
     *(.text .text.*)
   }
   __text_end = .;
@@ -31,7 +31,7 @@ SECTIONS
   }
 
   . = ALIGN(16);
-  . = . + 0x10000;          /* 64 KiB 開機堆疊 */
+  . = . + 0x10000;          /* 64 KiB boot stack */
   __stack_top = .;
 
   . = ALIGN(4096);

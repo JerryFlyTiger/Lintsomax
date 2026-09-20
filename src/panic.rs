@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
-//! Rust panic 的落地點。目前直接印出來然後收工。
+//! Landing site for Rust panics. For now it prints the report and shuts down.
 
 use core::panic::PanicInfo;
 
@@ -8,9 +8,9 @@ fn on_panic(info: &PanicInfo) -> ! {
     crate::println!();
     crate::println!("┌─ Lintsomax panic ───────────────────────────────");
     if let Some(loc) = info.location() {
-        crate::println!("│ 位置 : {}:{}:{}", loc.file(), loc.line(), loc.column());
+        crate::println!("│ Location: {}:{}:{}", loc.file(), loc.line(), loc.column());
     }
-    crate::println!("│ 訊息 : {}", info.message());
+    crate::println!("│ Message : {}", info.message());
     crate::println!("└──────────────────────────────────────────────────");
     crate::semihost::exit(1)
 }

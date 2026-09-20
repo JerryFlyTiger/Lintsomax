@@ -1,45 +1,45 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Linux-syscall-note
-//! 例外向量表與故障報告。
+//! Exception vector table and fault reporting.
 //!
-//! 這是 Lintsomax 的主題所在：故障不該是「整台機器倒下」，
-//! 而該是「一份看得懂的報告」。M0 先做到報告，隔離留給後面的里程碑。
+//! This is what Lintsomax is about: a fault should not mean "the whole machine
+//! goes down", it should mean "here is a report you can read". M0 delivers the
+//! report; isolation is left to later milestones.
 
 use core::arch::{asm, global_asm};
 
-// 16 個向量入口，每個 128 bytes（.align 7），整張表 2048 對齊（.align 11）。
-// 每個入口只做兩件事：把自己的編號放進 x0，跳到共用處理常式。
+// 16 vector entries, 128 bytes each (.align 7); the whole table is 2048-aligned
+// (.align 11). Every entry does just two things: put its own index in x0 and
+// jump to the shared handler.
 global_asm!(
     ".macro VEC_ENTRY idx",
     "   .align 7",
     "   mov x0, #\\idx",
     "   b   __exception_common",
     ".endm",
-
     ".section .text",
     ".align 11",
     ".global __vectors",
     "__vectors:",
-    // 目前 EL，使用 SP_EL0
+    // Current EL, using SP_EL0
     "   VEC_ENTRY 0", // Synchronous
     "   VEC_ENTRY 1", // IRQ
     "   VEC_ENTRY 2", // FIQ
     "   VEC_ENTRY 3", // SError
-    // 目前 EL，使用 SP_ELx  ← 核心自己出事會走這排
+    // Current EL, using SP_ELx  <- a kernel fault lands in this row
     "   VEC_ENTRY 4",
     "   VEC_ENTRY 5",
     "   VEC_ENTRY 6",
     "   VEC_ENTRY 7",
-    // 來自較低 EL（AArch64）  ← 未來使用者程式出事會走這排
+    // From a lower EL (AArch64)  <- a future user program's fault lands here
     "   VEC_ENTRY 8",
     "   VEC_ENTRY 9",
     "   VEC_ENTRY 10",
     "   VEC_ENTRY 11",
-    // 來自較低 EL（AArch32）
+    // From a lower EL (AArch32)
     "   VEC_ENTRY 12",
     "   VEC_ENTRY 13",
     "   VEC_ENTRY 14",
     "   VEC_ENTRY 15",
-
     "__exception_common:",
     "   bl  rust_exception_handler",
     "1: wfe",
@@ -50,7 +50,8 @@ extern "C" {
     static __vectors: u8;
 }
 
-/// 把向量表位址寫進 VBAR_EL1。在此之前發生例外會跳到 0x0，只能得到亂碼。
+/// Write the vector table address into VBAR_EL1. Before this runs, an exception
+/// jumps to 0x0 and all you get is garbage.
 pub fn init() {
     let vbar = unsafe { &__vectors as *const u8 as u64 };
     unsafe {
@@ -64,58 +65,59 @@ pub fn vbar() -> u64 {
     v
 }
 
-/// 16 個入口對應的名字。
+/// Names for the 16 vector entries.
 const SOURCE: [&str; 16] = [
-    "目前 EL / SP_EL0 · 同步",
-    "目前 EL / SP_EL0 · IRQ",
-    "目前 EL / SP_EL0 · FIQ",
-    "目前 EL / SP_EL0 · SError",
-    "目前 EL / SP_ELx · 同步",
-    "目前 EL / SP_ELx · IRQ",
-    "目前 EL / SP_ELx · FIQ",
-    "目前 EL / SP_ELx · SError",
-    "較低 EL (64-bit) · 同步",
-    "較低 EL (64-bit) · IRQ",
-    "較低 EL (64-bit) · FIQ",
-    "較低 EL (64-bit) · SError",
-    "較低 EL (32-bit) · 同步",
-    "較低 EL (32-bit) · IRQ",
-    "較低 EL (32-bit) · FIQ",
-    "較低 EL (32-bit) · SError",
+    "Current EL / SP_EL0 · Synchronous",
+    "Current EL / SP_EL0 · IRQ",
+    "Current EL / SP_EL0 · FIQ",
+    "Current EL / SP_EL0 · SError",
+    "Current EL / SP_ELx · Synchronous",
+    "Current EL / SP_ELx · IRQ",
+    "Current EL / SP_ELx · FIQ",
+    "Current EL / SP_ELx · SError",
+    "Lower EL (64-bit) · Synchronous",
+    "Lower EL (64-bit) · IRQ",
+    "Lower EL (64-bit) · FIQ",
+    "Lower EL (64-bit) · SError",
+    "Lower EL (32-bit) · Synchronous",
+    "Lower EL (32-bit) · IRQ",
+    "Lower EL (32-bit) · FIQ",
+    "Lower EL (32-bit) · SError",
 ];
 
-/// ESR_EL1 的 EC 欄位（bits 31:26）——例外的大分類。
+/// The EC field of ESR_EL1 (bits 31:26) - the broad class of the exception.
 fn describe_ec(ec: u64) -> &'static str {
     match ec {
-        0x00 => "不明原因",
-        0x0E => "非法的執行狀態",
-        0x15 => "SVC 系統呼叫",
-        0x18 => "被攔截的 MSR/MRS",
-        0x20 => "指令擷取失敗（來自較低 EL）",
-        0x21 => "指令擷取失敗（同一 EL）",
-        0x22 => "PC 未對齊",
-        0x24 => "資料存取失敗（來自較低 EL）",
-        0x25 => "資料存取失敗（同一 EL）",
-        0x26 => "SP 未對齊",
-        0x30 | 0x31 => "硬體中斷點",
-        0x3C => "BRK 除錯指令",
-        _ => "（尚未收錄的 EC）",
+        0x00 => "unknown reason",
+        0x0E => "illegal execution state",
+        0x15 => "SVC system call",
+        0x18 => "trapped MSR/MRS",
+        0x20 => "instruction abort (from a lower EL)",
+        0x21 => "instruction abort (same EL)",
+        0x22 => "PC misaligned",
+        0x24 => "data abort (from a lower EL)",
+        0x25 => "data abort (same EL)",
+        0x26 => "SP misaligned",
+        0x30 | 0x31 => "hardware breakpoint",
+        0x3C => "BRK debug instruction",
+        _ => "(EC not catalogued yet)",
     }
 }
 
-/// 資料/指令存取失敗時，ESR 低 6 位（DFSC/IFSC）說明「為什麼失敗」。
+/// On a data/instruction abort, the low 6 bits of ESR (DFSC/IFSC) say *why* it
+/// failed.
 fn describe_fsc(fsc: u64) -> &'static str {
     match fsc {
-        0x00..=0x03 => "位址大小錯誤",
-        0x04 => "轉譯失敗 level 0（頁表根本沒建）",
-        0x05 => "轉譯失敗 level 1",
-        0x06 => "轉譯失敗 level 2",
-        0x07 => "轉譯失敗 level 3",
-        0x08..=0x0B => "存取旗標失敗",
-        0x0C..=0x0F => "權限不足",
-        0x10 => "外部匯流排錯誤",
-        0x21 => "未對齊存取",
-        _ => "（尚未收錄的 FSC）",
+        0x00..=0x03 => "address size fault",
+        0x04 => "translation fault level 0 (no page table at all)",
+        0x05 => "translation fault level 1",
+        0x06 => "translation fault level 2",
+        0x07 => "translation fault level 3",
+        0x08..=0x0B => "access flag fault",
+        0x0C..=0x0F => "permission fault",
+        0x10 => "external bus error",
+        0x21 => "unaligned access",
+        _ => "(FSC not catalogued yet)",
     }
 }
 
@@ -131,24 +133,24 @@ extern "C" fn rust_exception_handler(index: u64) -> ! {
 
     let ec = (esr >> 26) & 0x3F;
     let fsc = esr & 0x3F;
-    let source = SOURCE.get(index as usize).copied().unwrap_or("？");
+    let source = SOURCE.get(index as usize).copied().unwrap_or("?");
 
     crate::println!();
-    crate::println!("┌─ Lintsomax 攔到一個例外 ─────────────────────────");
-    crate::println!("│ 來源     : [{:>2}] {}", index, source);
-    crate::println!("│ 分類     : EC=0x{:02X}  {}", ec, describe_ec(ec));
+    crate::println!("┌─ Lintsomax caught an exception ─────────────────");
+    crate::println!("│ Source      : [{:>2}] {}", index, source);
+    crate::println!("│ Class       : EC=0x{:02X}  {}", ec, describe_ec(ec));
     if ec == 0x24 || ec == 0x25 || ec == 0x20 || ec == 0x21 {
-        crate::println!("│ 原因     : FSC=0x{:02X}  {}", fsc, describe_fsc(fsc));
-        crate::println!("│ 出事位址 : 0x{:016X}   (FAR_EL1)", far);
+        crate::println!("│ Reason      : FSC=0x{:02X}  {}", fsc, describe_fsc(fsc));
+        crate::println!("│ Fault addr  : 0x{:016X}   (FAR_EL1)", far);
     }
-    crate::println!("│ 出事指令 : 0x{:016X}   (ELR_EL1)", elr);
-    crate::println!("│ 原始 ESR : 0x{:016X}", esr);
-    crate::println!("│ 原始 SPSR: 0x{:016X}", spsr);
+    crate::println!("│ Fault instr : 0x{:016X}   (ELR_EL1)", elr);
+    crate::println!("│ Raw ESR     : 0x{:016X}", esr);
+    crate::println!("│ Raw SPSR    : 0x{:016X}", spsr);
     crate::println!("└──────────────────────────────────────────────────");
     crate::println!();
-    crate::println!("在 Linux 上，這一刻整台機器已經 panic。");
-    crate::println!("Lintsomax 的目標是：只有闖禍的那個元件倒下。");
-    crate::println!("（M0 還沒有隔離，所以現在一樣只能停在這裡。）");
+    crate::println!("On Linux, the whole machine would have panicked by now.");
+    crate::println!("The goal of Lintsomax is that only the component at fault goes down.");
+    crate::println!("(M0 has no isolation yet, so for now this is still where it stops.)");
 
     crate::semihost::exit(0)
 }
